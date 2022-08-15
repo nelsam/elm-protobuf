@@ -20,18 +20,24 @@ import (
 	"google.golang.org/protobuf/types/pluginpb"
 )
 
-const version = "0.0.2"
-const docUrl = "https://github.com/jalandis/elm-protobuf"
+const (
+	version = "0.0.2"
+	docUrl  = "https://github.com/jalandis/elm-protobuf"
+
+	extension = ".elm"
+)
 
 var excludedFiles = map[string]bool{
-	"google/protobuf/timestamp.proto": true,
-	"google/protobuf/wrappers.proto":  true,
+	"google/protobuf/timestamp.proto":  true,
+	"google/protobuf/wrappers.proto":   true,
+	"google/protobuf/descriptor.proto": true,
 }
 
 type parameters struct {
 	Version          bool
 	Debug            bool
 	RemoveDeprecated bool
+	modPrefix        string
 }
 
 func parseParameters(input *string) (parameters, error) {
@@ -42,14 +48,21 @@ func parseParameters(input *string) (parameters, error) {
 		return result, nil
 	}
 
-	for _, i := range strings.Split(*input, ",") {
-		switch i {
+	for _, v := range strings.Split(*input, ",") {
+		parts := strings.Split(v, "=")
+		name := parts[0]
+		v := parts[1:]
+		switch name {
 		case "remove-deprecated":
 			result.RemoveDeprecated = true
 		case "debug":
 			result.Debug = true
+		case "module-prefix":
+			result.modPrefix = v[0]
+		case "exclude":
+			excludedFiles[v[0]] = true
 		default:
-			err = fmt.Errorf("unknown parameter: \"%s\"", i)
+			err = fmt.Errorf("unknown parameter: \"%s\"", name)
 		}
 	}
 
@@ -241,9 +254,9 @@ uselessDeclarationToPreventErrorDueToEmptyOutputFile = 42
 		Messages          []pbMessage
 	}{
 		SourceFile:        inFile.GetName(),
-		ModuleName:        moduleName(inFile.GetName()),
+		ModuleName:        moduleName(p.modPrefix, inFile.GetName()),
 		ImportDict:        hasMapEntries(inFile),
-		AdditionalImports: getAdditionalImports(inFile.GetDependency()),
+		AdditionalImports: additionalImports(p.modPrefix, inFile.GetDependency()),
 		TopEnums:          enumsToCustomTypes([]string{}, inFile.GetEnumType(), p),
 		Messages:          messages([]string{}, inFile.GetMessageType(), p),
 	}); err != nil {
@@ -469,43 +482,49 @@ func fileName(inFilePath string) string {
 		fullFileName += stringextras.FirstUpper(segment) + "/"
 	}
 
-	return fullFileName + shortFileName + ".elm"
+	return fullFileName + shortFileName + extension
 }
 
-func moduleName(inFilePath string) string {
+func moduleName(modPrefix, inFilePath string) string {
 	inFileDir, inFileName := filepath.Split(inFilePath)
 
 	trimmed := strings.TrimSuffix(inFileName, ".proto")
 	shortModuleName := stringextras.FirstUpper(trimmed)
 
-	fullModuleName := ""
-	for _, segment := range strings.Split(inFileDir, "/") {
+	path := strings.Split(inFileDir, string(filepath.Separator))
+	if modPrefix != "" {
+		path = append(strings.Split(modPrefix, "."), path...)
+	}
+
+	var final []string
+	for _, segment := range path {
 		if segment == "" {
 			continue
 		}
 
-		fullModuleName += stringextras.FirstUpper(segment) + "."
+		final = append(final, stringextras.FirstUpper(segment))
 	}
 
-	return fullModuleName + shortModuleName
+	return strings.Join(append(final, shortModuleName), ".")
 }
 
-func getAdditionalImports(dependencies []string) []string {
+func additionalImports(modPrefix string, dependencies []string) []string {
+	prefix := strings.Split(modPrefix, ".")
 	var additions []string
 	for _, d := range dependencies {
 		if excludedFiles[d] {
 			continue
 		}
 
-		fullModuleName := ""
+		final := append([]string(nil), prefix...)
 		for _, segment := range strings.Split(strings.TrimSuffix(d, ".proto"), "/") {
 			if segment == "" {
 				continue
 			}
-			fullModuleName += stringextras.FirstUpper(segment) + "."
+			final = append(final, stringextras.FirstUpper(segment))
 		}
 
-		additions = append(additions, strings.TrimSuffix(fullModuleName, "."))
+		additions = append(additions, strings.Join(final, "."))
 	}
 	return additions
 }
