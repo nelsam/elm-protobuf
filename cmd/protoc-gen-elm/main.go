@@ -167,7 +167,18 @@ func hasMapEntriesInMessage(inMessage *descriptorpb.DescriptorProto) bool {
 }
 
 func templateFile(inFile *descriptorpb.FileDescriptorProto, p parameters) (string, error) {
-	t := template.New("t")
+	t := template.New("t").Funcs(template.FuncMap{
+		"fieldSeq": func(from int, to elm.ProtobufFieldNumber) []int {
+			var l []int
+			for i := from; i < int(to); i++ {
+				l = append(l, i)
+			}
+			return l
+		},
+		"nextFieldNum": func(n elm.ProtobufFieldNumber) int {
+			return int(n) + 1
+		},
+	})
 
 	t, err := elm.EnumCustomTypeTemplate(t)
 	if err != nil {
@@ -228,7 +239,33 @@ import {{ . }} exposing (..)
 {{ end }}
 
 
-uselessDeclarationToPreventErrorDueToEmptyOutputFile = 42
+-- noop is here because I don't know elm well enough to know how to provide
+-- a (a -> a) function to JE.list without it.
+noop : JE.Value -> JE.Value
+noop v =
+    v
+
+
+valueList : List JE.Value -> JE.Value
+valueList l =
+    JE.list noop l
+
+
+requiredIdx : Int -> JD.Decoder a -> a -> JD.Decoder (a -> b) -> JD.Decoder b
+requiredIdx idx decoder default =
+    JD.map2 (|>) (JD.oneOf [ JD.index idx decoder, JD.succeed default ])
+
+
+maybeEncoder : (a -> JE.Value) -> Maybe a -> JE.Value
+maybeEncoder enc v =
+    case v of
+        Nothing ->
+            JE.null
+
+        Just av ->
+            enc av
+
+
 {{- range .TopEnums }}
 
 
@@ -302,9 +339,8 @@ func enumsToCustomTypes(preface []string, enumPbs []*descriptorpb.EnumDescriptor
 			}
 
 			values = append(values, elm.EnumVariant{
-				Name:     elm.NestedVariantName(value.GetName(), preface),
-				Number:   elm.ProtobufFieldNumber(value.GetNumber()),
-				JSONName: elm.EnumVariantJSONName(value),
+				Name:  elm.NestedVariantName(value.GetName(), preface),
+				Value: elm.ProtobufFieldNumber(value.GetNumber()),
 			})
 		}
 
@@ -342,11 +378,11 @@ func oneOfsToCustomTypes(preface []string, messagePb *descriptorpb.DescriptorPro
 			}
 
 			variants = append(variants, elm.OneOfVariant{
-				Name:     elm.NestedVariantName(inField.GetName(), preface),
-				JSONName: elm.OneOfVariantJSONName(inField),
-				Type:     elm.BasicFieldType(inField),
-				Decoder:  elm.BasicFieldDecoder(inField),
-				Encoder:  elm.BasicFieldEncoder(inField),
+				Name:    elm.NestedVariantName(inField.GetName(), preface),
+				Type:    elm.BasicFieldType(inField),
+				Num:     elm.ProtobufFieldNumber(inField.GetNumber()),
+				Decoder: elm.BasicFieldDecoder(inField),
+				Encoder: elm.BasicFieldEncoder(inField),
 			})
 		}
 
@@ -388,7 +424,9 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 					Encoder: elm.MapEncoder(fieldPb, nested),
 					Decoder: elm.MapDecoder(fieldPb, nested),
 				})
-			} else if isOptional(fieldPb) {
+				continue
+			}
+			if isOptional(fieldPb) {
 				newFields = append(newFields, elm.TypeAliasField{
 					Name:    elm.FieldName(fieldPb.GetName()),
 					Type:    elm.MaybeType(elm.BasicFieldType(fieldPb)),
@@ -396,7 +434,9 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 					Encoder: elm.MaybeEncoder(fieldPb),
 					Decoder: elm.MaybeDecoder(fieldPb),
 				})
-			} else if isRepeated(fieldPb) {
+				continue
+			}
+			if isRepeated(fieldPb) {
 				newFields = append(newFields, elm.TypeAliasField{
 					Name:    elm.FieldName(fieldPb.GetName()),
 					Type:    elm.ListType(elm.BasicFieldType(fieldPb)),
@@ -404,15 +444,15 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 					Encoder: elm.ListEncoder(fieldPb),
 					Decoder: elm.ListDecoder(fieldPb),
 				})
-			} else {
-				newFields = append(newFields, elm.TypeAliasField{
-					Name:    elm.FieldName(fieldPb.GetName()),
-					Type:    elm.BasicFieldType(fieldPb),
-					Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
-					Encoder: elm.RequiredFieldEncoder(fieldPb),
-					Decoder: elm.RequiredFieldDecoder(fieldPb),
-				})
+				continue
 			}
+			newFields = append(newFields, elm.TypeAliasField{
+				Name:    elm.FieldName(fieldPb.GetName()),
+				Type:    elm.BasicFieldType(fieldPb),
+				Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
+				Encoder: elm.RequiredFieldEncoder(fieldPb),
+				Decoder: elm.RequiredFieldDecoder(fieldPb),
+			})
 		}
 
 		for _, oneOfPb := range messagePb.GetOneofDecl() {

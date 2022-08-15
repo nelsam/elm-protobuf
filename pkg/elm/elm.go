@@ -26,21 +26,19 @@ var (
 // Used for both constants and function declarations
 type VariableName string
 
-// VariantJSONName - unique JSON identifier, uppercase snake case, for a custom type variant
-type VariantJSONName string
-
-// ProtobufFieldNumber - unique identifier required for protobuff field declarations
-// Used only for commentsin Elm code generation
-type ProtobufFieldNumber int32
+// ProtobufFieldNumber - unique identifier required for protobuf field
+// declarations. Used as the index in json array values (how generated
+// javascript code stores protobuf messages internally).
+type ProtobufFieldNumber int
 
 // DecoderName - decoder function name for Elm type
 func DecoderName(t Type) VariableName {
-	return VariableName(stringextras.FirstLower(fmt.Sprintf("%sDecoder", t)))
+	return VariableName(stringextras.FirstLower(fmt.Sprintf("%sPortDecoder", t)))
 }
 
 // EncoderName - encoder function name for Elm type
 func EncoderName(t Type) VariableName {
-	return VariableName(stringextras.FirstLower(fmt.Sprintf("%sEncoder", t)))
+	return VariableName(stringextras.FirstLower(fmt.Sprintf("%sPortEncoder", t)))
 }
 
 // NestedType - top level Elm type for a possibly nested PB definition

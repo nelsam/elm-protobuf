@@ -113,7 +113,7 @@ type TypeAliasField struct {
 	Encoder FieldEncoder
 }
 
-func appendUnderscoreToReservedKeywords(in string) string {
+func avoidCollision(in string) string {
 	if reservedKeywords[in] {
 		return fmt.Sprintf("%s_", in)
 	}
@@ -121,30 +121,36 @@ func appendUnderscoreToReservedKeywords(in string) string {
 	return in
 }
 
-// FieldName - simple camelcase variable name with first letter lower
-func FieldName(in string) VariableName {
-	return VariableName(appendUnderscoreToReservedKeywords(stringextras.LowerCamelCase(in)))
+// jsIdx returns the index that javascript generated code typically uses for a
+// given field. There appear to be some scenarios where javascript reserves the
+// 0th index, but I haven't encountered it in my own protobufs.
+func jsIdx(i ProtobufFieldNumber) int {
+	return int(i) - 1
 }
 
-// FieldJSONName - JSON identifier for field decoder/encoding
-func FieldJSONName(pb *descriptorpb.FieldDescriptorProto) VariantJSONName {
-	return VariantJSONName(pb.GetJsonName())
+// FieldName - simple camelcase variable name with first letter lower
+func FieldName(in string) VariableName {
+	return VariableName(avoidCollision(stringextras.LowerCamelCase(in)))
 }
 
 func RequiredFieldEncoder(pb *descriptorpb.FieldDescriptorProto) FieldEncoder {
 	return FieldEncoder(fmt.Sprintf(
-		"requiredFieldEncoder \"%s\" %s %s v.%s",
-		FieldJSONName(pb),
+		"%s v.%s",
 		BasicFieldEncoder(pb),
-		BasicFieldDefaultValue(pb),
 		FieldName(pb.GetName()),
 	))
 }
 
+// FieldNum - the field number for referencing indexes in json internal
+// representations of messages.
+func FieldNum(pb *descriptorpb.FieldDescriptorProto) ProtobufFieldNumber {
+	return ProtobufFieldNumber(pb.GetNumber())
+}
+
 func RequiredFieldDecoder(pb *descriptorpb.FieldDescriptorProto) FieldDecoder {
 	return FieldDecoder(fmt.Sprintf(
-		"required \"%s\" %s %s",
-		FieldJSONName(pb),
+		"requiredIdx %d %s %s",
+		jsIdx(FieldNum(pb)),
 		BasicFieldDecoder(pb),
 		BasicFieldDefaultValue(pb),
 	))
@@ -182,8 +188,8 @@ func MapEncoder(
 	valueField := messagePb.GetField()[1]
 
 	return FieldEncoder(fmt.Sprintf(
-		"mapEntriesFieldEncoder \"%s\" %s v.%s",
-		FieldJSONName(fieldPb),
+		"mapEntriesFieldEncoder %d %s v.%s",
+		FieldNum(fieldPb),
 		BasicFieldEncoder(valueField),
 		FieldName(fieldPb.GetName()),
 	))
@@ -196,8 +202,8 @@ func MapDecoder(
 	valueField := messagePb.GetField()[1]
 
 	return FieldDecoder(fmt.Sprintf(
-		"mapEntries \"%s\" %s",
-		FieldJSONName(fieldPb),
+		"mapEntries %d %s",
+		FieldNum(fieldPb),
 		BasicFieldDecoder(valueField),
 	))
 }
@@ -208,8 +214,7 @@ func MaybeType(t Type) Type {
 
 func MaybeEncoder(pb *descriptorpb.FieldDescriptorProto) FieldEncoder {
 	return FieldEncoder(fmt.Sprintf(
-		"optionalEncoder \"%s\" %s v.%s",
-		FieldJSONName(pb),
+		"maybeEncoder %s v.%s",
 		BasicFieldEncoder(pb),
 		FieldName(pb.GetName()),
 	))
@@ -217,8 +222,8 @@ func MaybeEncoder(pb *descriptorpb.FieldDescriptorProto) FieldEncoder {
 
 func MaybeDecoder(pb *descriptorpb.FieldDescriptorProto) FieldDecoder {
 	return FieldDecoder(fmt.Sprintf(
-		"optional \"%s\" %s",
-		FieldJSONName(pb),
+		"requiredIdx %d (JD.maybe %s) Nothing",
+		jsIdx(FieldNum(pb)),
 		BasicFieldDecoder(pb),
 	))
 }
@@ -229,8 +234,7 @@ func ListType(t Type) Type {
 
 func ListEncoder(pb *descriptorpb.FieldDescriptorProto) FieldEncoder {
 	return FieldEncoder(fmt.Sprintf(
-		"repeatedFieldEncoder \"%s\" %s v.%s",
-		FieldJSONName(pb),
+		"JE.list %s v.%s",
 		BasicFieldEncoder(pb),
 		FieldName(pb.GetName()),
 	))
@@ -238,14 +242,14 @@ func ListEncoder(pb *descriptorpb.FieldDescriptorProto) FieldEncoder {
 
 func ListDecoder(pb *descriptorpb.FieldDescriptorProto) FieldDecoder {
 	return FieldDecoder(fmt.Sprintf(
-		"repeated \"%s\" %s",
-		FieldJSONName(pb),
+		"requiredIdx %d (JD.list %s) []",
+		jsIdx(FieldNum(pb)),
 		BasicFieldDecoder(pb),
 	))
 }
 
 func OneOfType(in string) Type {
-	return Type(appendUnderscoreToReservedKeywords(stringextras.UpperCamelCase(in)))
+	return Type(avoidCollision(stringextras.UpperCamelCase(in)))
 }
 
 // TypeAliasTemplate - defines templates for self contained type aliases
@@ -258,18 +262,34 @@ type alias {{ .Name }} =
     {{ end }}}
 
 
+-- {{ .Decoder }} is used to decode protobuf messages from ports, following the javascript
+-- array format.
 {{ .Decoder }} : JD.Decoder {{ .Name }}
 {{ .Decoder }} =
     JD.lazy <| \_ -> decode {{ .Name }}{{ range .Fields }}
         |> {{ .Decoder }}{{ end }}
 
 
+-- {{ .Encoder }} is used to encode protobuf messages for ports, so that javascript code
+-- may use the value in the message constructor.
 {{ .Encoder }} : {{ .Name }} -> JE.Value
 {{ .Encoder }} v =
-    JE.object <| List.filterMap identity <|
-        [{{ range $i, $v := .Fields }}
-            {{- if $i }},{{ end }} ({{ .Encoder }})
-        {{ end }}]
+    -- javascript uses the field number to index into arrays, so we need to ensure that
+    -- the list has empty values at indexes that don't have fields.
+    {{- $idx := 1 }}
+    valueList
+        [ {{ range $i, $v := .Fields -}}
+         {{- range (fieldSeq $idx $v.Number) -}}
+         {{- if (ne . 1) }}
+        , {{ end -}}
+             JE.null
+         {{- end }}
+         {{- if (ne $v.Number 1) }}
+        , {{ end -}}
+         ({{ $v.Encoder }})
+         {{- $idx = (nextFieldNum $v.Number) -}}
+        {{ end }}
+        ]
 {{- end -}}
 `)
 }
