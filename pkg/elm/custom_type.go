@@ -51,11 +51,10 @@ type OneOfVariant struct {
 
 // NestedVariantName - Elm variant name for a possibly nested PB definition
 func NestedVariantName(name string, preface []string) VariantName {
-	fullName := stringextras.CamelCase(strings.ToLower(name))
-	for _, p := range preface {
-		fullName = fmt.Sprintf("%s_%s", stringextras.CamelCase(p), fullName)
-	}
-
+    fullName := strings.Join(
+        append(preface, stringextras.CamelCase(strings.ToLower(name))),
+        "_",
+    )
 	return VariantName(fullName)
 }
 
@@ -127,15 +126,15 @@ type {{ .Name }}
         ]
 
 
-{{ .Encoder }} : {{ .Name }} -> Maybe ( Int, JE.Value )
-{{ .Encoder }} v =
+{{ .Encoder }} : Int -> {{ .Name }} -> JE.Value
+{{ .Encoder }} idx v =
     case v of
         {{ .Name }}Unspecified ->
-            Nothing
+            JE.null
         {{- range .Variants }}
 
         {{ .Name }} x ->
-            Just ( {{ .Num }}, {{ .Encoder }} x )
+            if idx == {{ .Num }} then {{ .Encoder }} x else JE.null
         {{- end }}
 {{- end -}}
 `)

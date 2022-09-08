@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -251,6 +252,11 @@ valueList l =
     JE.list noop l
 
 
+custom : JD.Decoder a -> JD.Decoder (a -> b) -> JD.Decoder b
+custom =
+    JD.map2 (|>)
+
+
 requiredIdx : Int -> JD.Decoder a -> a -> JD.Decoder (a -> b) -> JD.Decoder b
 requiredIdx idx decoder default =
     JD.map2 (|>) (JD.oneOf [ JD.index idx decoder, JD.succeed default ])
@@ -405,77 +411,101 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 			continue
 		}
 
-		var newFields []elm.TypeAliasField
+		name := elm.NestedType(messagePb.GetName(), preface)
+		nestedPreface := append([]string{messagePb.GetName()}, preface...)
+		alias := elm.TypeAlias{
+			Name:    name,
+			Decoder: elm.DecoderName(name),
+			Encoder: elm.EncoderName(name),
+		}
 		for _, fieldPb := range messagePb.GetField() {
 			if isDeprecated(fieldPb.Options) && p.RemoveDeprecated {
 				continue
 			}
 
 			if fieldPb.OneofIndex != nil {
+				// For encoding, we need one encoder for each variant in
+				// the oneof, but for decoding, we only want one decoder
+				// for the whole oneof.
+				oneof := messagePb.GetOneofDecl()[fieldPb.GetOneofIndex()]
+				typeName := elm.OneOfType(elm.NestedType(oneof.GetName(), nestedPreface))
+				alias.FieldEncoders = append(alias.FieldEncoders, elm.TypeAliasField{
+					Name:    elm.FieldName(oneof.GetName()),
+					Type:    typeName,
+					Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
+					Encoder: elm.OneOfEncoder(oneof, fieldPb, typeName),
+				})
 				continue
 			}
 
 			nested := getNestedType(fieldPb, messagePb)
 			if nested != nil {
-				newFields = append(newFields, elm.TypeAliasField{
+				field := elm.TypeAliasField{
 					Name:    elm.FieldName(fieldPb.GetName()),
 					Type:    elm.MapType(nested),
 					Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
 					Encoder: elm.MapEncoder(fieldPb, nested),
 					Decoder: elm.MapDecoder(fieldPb, nested),
-				})
+				}
+				alias.Fields = append(alias.Fields, field)
+				alias.FieldEncoders = append(alias.FieldEncoders, field)
 				continue
 			}
 			if isOptional(fieldPb) {
-				newFields = append(newFields, elm.TypeAliasField{
+				field := elm.TypeAliasField{
 					Name:    elm.FieldName(fieldPb.GetName()),
 					Type:    elm.MaybeType(elm.BasicFieldType(fieldPb)),
 					Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
 					Encoder: elm.MaybeEncoder(fieldPb),
 					Decoder: elm.MaybeDecoder(fieldPb),
-				})
+				}
+				alias.Fields = append(alias.Fields, field)
+				alias.FieldEncoders = append(alias.FieldEncoders, field)
 				continue
 			}
 			if isRepeated(fieldPb) {
-				newFields = append(newFields, elm.TypeAliasField{
+				field := elm.TypeAliasField{
 					Name:    elm.FieldName(fieldPb.GetName()),
 					Type:    elm.ListType(elm.BasicFieldType(fieldPb)),
 					Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
 					Encoder: elm.ListEncoder(fieldPb),
 					Decoder: elm.ListDecoder(fieldPb),
-				})
+				}
+				alias.Fields = append(alias.Fields, field)
+				alias.FieldEncoders = append(alias.FieldEncoders, field)
 				continue
 			}
-			newFields = append(newFields, elm.TypeAliasField{
+			field := elm.TypeAliasField{
 				Name:    elm.FieldName(fieldPb.GetName()),
 				Type:    elm.BasicFieldType(fieldPb),
 				Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
 				Encoder: elm.RequiredFieldEncoder(fieldPb),
 				Decoder: elm.RequiredFieldDecoder(fieldPb),
-			})
+			}
+			alias.Fields = append(alias.Fields, field)
+			alias.FieldEncoders = append(alias.FieldEncoders, field)
 		}
+		sort.Slice(alias.FieldEncoders, func(i, j int) bool {
+			// Order matters in the encoders, since their index has to correspond to
+			// their field number for port encoding.  The template fills in gaps but
+			// has no way to backtrack if it has already filled in an index.
+			return alias.FieldEncoders[i].Number < alias.FieldEncoders[j].Number
+		})
 
 		for _, oneOfPb := range messagePb.GetOneofDecl() {
-			newFields = append(newFields, elm.TypeAliasField{
+			typeName := elm.OneOfType(elm.NestedType(oneOfPb.GetName(), nestedPreface))
+			alias.Fields = append(alias.Fields, elm.TypeAliasField{
 				Name:    elm.FieldName(oneOfPb.GetName()),
-				Type:    elm.OneOfType(oneOfPb.GetName()),
-				Encoder: elm.OneOfEncoder(oneOfPb),
-				Decoder: elm.OneOfDecoder(oneOfPb),
+				Type:    typeName,
+				Decoder: elm.OneOfDecoder(oneOfPb, typeName),
 			})
 		}
 
-		newPreface := append([]string{messagePb.GetName()}, preface...)
-		name := elm.NestedType(messagePb.GetName(), preface)
 		result = append(result, pbMessage{
-			TypeAlias: elm.TypeAlias{
-				Name:    name,
-				Decoder: elm.DecoderName(name),
-				Encoder: elm.EncoderName(name),
-				Fields:  newFields,
-			},
-			OneOfCustomTypes: oneOfsToCustomTypes([]string{}, messagePb, p),
-			EnumCustomTypes:  enumsToCustomTypes(newPreface, messagePb.GetEnumType(), p),
-			NestedMessages:   messages(newPreface, messagePb.GetNestedType(), p),
+			TypeAlias:        alias,
+			OneOfCustomTypes: oneOfsToCustomTypes(nestedPreface, messagePb, p),
+			EnumCustomTypes:  enumsToCustomTypes(nestedPreface, messagePb.GetEnumType(), p),
+			NestedMessages:   messages(nestedPreface, messagePb.GetNestedType(), p),
 		})
 	}
 

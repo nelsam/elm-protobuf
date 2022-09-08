@@ -92,10 +92,11 @@ var (
 // TypeAlias - defines an Elm type alias (somtimes called a record)
 // https://guide.elm-lang.org/types/type_aliases.html
 type TypeAlias struct {
-	Name    Type
-	Decoder VariableName
-	Encoder VariableName
-	Fields  []TypeAliasField
+	Name          Type
+	Decoder       VariableName
+	Encoder       VariableName
+	FieldEncoders []TypeAliasField
+	Fields        []TypeAliasField
 }
 
 // FieldDecoder used in type alias decdoer (ex. )
@@ -141,7 +142,7 @@ func RequiredFieldEncoder(pb *descriptorpb.FieldDescriptorProto) FieldEncoder {
 	))
 }
 
-// FieldNum - the field number for referencing indexes in json internal
+// FieldNum returns the field number for referencing indexes in json internal
 // representations of messages.
 func FieldNum(pb *descriptorpb.FieldDescriptorProto) ProtobufFieldNumber {
 	return ProtobufFieldNumber(pb.GetNumber())
@@ -156,17 +157,17 @@ func RequiredFieldDecoder(pb *descriptorpb.FieldDescriptorProto) FieldDecoder {
 	))
 }
 
-func OneOfEncoder(pb *descriptorpb.OneofDescriptorProto) FieldEncoder {
-	return FieldEncoder(fmt.Sprintf("%s v.%s",
-		EncoderName(Type(stringextras.CamelCase(pb.GetName()))),
-		FieldName(pb.GetName()),
+func OneOfEncoder(oneof *descriptorpb.OneofDescriptorProto, field *descriptorpb.FieldDescriptorProto, t Type) FieldEncoder {
+	return FieldEncoder(fmt.Sprintf("%s %d v.%s",
+		EncoderName(t),
+		FieldNum(field),
+		FieldName(oneof.GetName()),
 	))
 }
 
-func OneOfDecoder(pb *descriptorpb.OneofDescriptorProto) FieldDecoder {
-	return FieldDecoder(fmt.Sprintf(
-		"field %s",
-		DecoderName(Type(stringextras.CamelCase(pb.GetName()))),
+func OneOfDecoder(pb *descriptorpb.OneofDescriptorProto, t Type) FieldDecoder {
+	return FieldDecoder(fmt.Sprintf("custom %s",
+		DecoderName(t),
 	))
 }
 
@@ -248,8 +249,11 @@ func ListDecoder(pb *descriptorpb.FieldDescriptorProto) FieldDecoder {
 	))
 }
 
-func OneOfType(in string) Type {
-	return Type(avoidCollision(stringextras.UpperCamelCase(in)))
+// OneOfType returns the type of a oneof field.  Oneof fields will always
+// be nested (they cannot be defined outside of a message type), so we know
+// that we will always be passed the result of a NestedType call.
+func OneOfType(in Type) Type {
+	return in
 }
 
 // TypeAliasTemplate - defines templates for self contained type aliases
@@ -278,7 +282,7 @@ type alias {{ .Name }} =
     -- the list has empty values at indexes that don't have fields.
     {{- $idx := 1 }}
     valueList
-        [ {{ range $i, $v := .Fields -}}
+        [ {{ range $i, $v := .FieldEncoders -}}
          {{- range (fieldSeq $idx $v.Number) -}}
          {{- if (ne . 1) }}
         , {{ end -}}

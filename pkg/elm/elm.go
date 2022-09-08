@@ -43,11 +43,10 @@ func EncoderName(t Type) VariableName {
 
 // NestedType - top level Elm type for a possibly nested PB definition
 func NestedType(name string, preface []string) Type {
-	fullName := stringextras.CamelCase(name)
-	for _, p := range preface {
-		fullName = fmt.Sprintf("%s_%s", p, fullName)
-	}
-
+	fullName := strings.Join(
+		append(preface, stringextras.CamelCase(name)),
+		"_",
+	)
 	return Type(stringextras.FirstUpper(fullName))
 }
 
