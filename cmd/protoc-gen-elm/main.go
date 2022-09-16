@@ -179,6 +179,9 @@ func templateFile(inFile *descriptorpb.FileDescriptorProto, p parameters) (strin
 		"nextFieldNum": func(n elm.ProtobufFieldNumber) int {
 			return int(n) + 1
 		},
+		"toJSIdx": func(n elm.ProtobufFieldNumber) int {
+			return int(n) - 1
+		},
 	})
 
 	t, err := elm.EnumCustomTypeTemplate(t)
