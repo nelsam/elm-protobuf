@@ -110,6 +110,7 @@ type TypeAliasField struct {
 	Name    VariableName
 	Type    Type
 	Number  ProtobufFieldNumber
+	Default string
 	Decoder FieldDecoder
 	Encoder FieldEncoder
 }
@@ -264,6 +265,15 @@ type alias {{ .Name }} =
     { {{ range $i, $v := .Fields }}
         {{- if $i }}, {{ end }}{{ .Name }} : {{ .Type }}{{ if .Number }} -- {{ .Number }}{{ end }}
     {{ end }}}
+
+
+default{{ .Name }} : {{ .Name }}
+default{{ .Name }} =
+  { {{- range $i, $v := .Fields -}}
+  {{- if $i }}
+  , {{ end }}{{ .Name }} = {{ .Default }}
+  {{- end }}
+  }
 
 
 -- {{ .Decoder }} is used to decode protobuf messages from ports, following the javascript

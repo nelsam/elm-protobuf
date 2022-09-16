@@ -167,9 +167,7 @@ func BasicFieldType(inField *descriptorpb.FieldDescriptorProto) Type {
 	}
 }
 
-type DefaultValue string
-
-func BasicFieldDefaultValue(inField *descriptorpb.FieldDescriptorProto) DefaultValue {
+func BasicFieldDefaultValue(inField *descriptorpb.FieldDescriptorProto) string {
 	if inField.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REPEATED {
 		return "[]"
 	}
@@ -184,11 +182,10 @@ func BasicFieldDefaultValue(inField *descriptorpb.FieldDescriptorProto) DefaultV
 		descriptorpb.FieldDescriptorProto_TYPE_FIXED32,
 		descriptorpb.FieldDescriptorProto_TYPE_FIXED64,
 		descriptorpb.FieldDescriptorProto_TYPE_SFIXED32,
-		descriptorpb.FieldDescriptorProto_TYPE_SFIXED64:
-		return "0"
-	case descriptorpb.FieldDescriptorProto_TYPE_FLOAT,
+		descriptorpb.FieldDescriptorProto_TYPE_SFIXED64,
+		descriptorpb.FieldDescriptorProto_TYPE_FLOAT,
 		descriptorpb.FieldDescriptorProto_TYPE_DOUBLE:
-		return "0.0"
+		return "0"
 	case descriptorpb.FieldDescriptorProto_TYPE_BOOL:
 		return "False"
 	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
@@ -196,10 +193,11 @@ func BasicFieldDefaultValue(inField *descriptorpb.FieldDescriptorProto) DefaultV
 	case descriptorpb.FieldDescriptorProto_TYPE_BYTES:
 		return "[]"
 	case descriptorpb.FieldDescriptorProto_TYPE_ENUM:
-		return DefaultValue(EnumDefaultVariantVariableName(ExternalType(inField.GetTypeName())))
+		return string(EnumDefaultVariantVariableName(ExternalType(inField.GetTypeName())))
 	case descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
-		fallthrough
+		return "Nothing"
 	default:
+		// TODO: maps and stuff
 		panic(fmt.Errorf("error - no known default value for field %s", inField.GetType()))
 	}
 }

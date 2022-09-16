@@ -404,6 +404,24 @@ func oneOfsToCustomTypes(preface []string, messagePb *descriptorpb.DescriptorPro
 	return result
 }
 
+func fieldDefault(field *descriptorpb.FieldDescriptorProto) string {
+	defV := field.GetDefaultValue()
+
+	switch field.GetType() {
+	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
+		defV = fmt.Sprintf(`"%s"`, strings.Replace(defV, `"`, `\"`, -1))
+	case descriptorpb.FieldDescriptorProto_TYPE_BOOL:
+		// Elm uses 'False' and 'True' but golang libraries will decode
+		// these as 'false' and 'true'.
+		defV = strings.ToUpper(defV[:1])+defV[1:]
+	default:
+	}
+	if defV == "" {
+		return elm.BasicFieldDefaultValue(field)
+	}
+	return defV
+}
+
 func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p parameters) []pbMessage {
 	var result []pbMessage
 	for _, messagePb := range messagePbs {
@@ -418,6 +436,7 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 			Decoder: elm.DecoderName(name),
 			Encoder: elm.EncoderName(name),
 		}
+
 		for _, fieldPb := range messagePb.GetField() {
 			if isDeprecated(fieldPb.Options) && p.RemoveDeprecated {
 				continue
@@ -444,6 +463,7 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 					Name:    elm.FieldName(fieldPb.GetName()),
 					Type:    elm.MapType(nested),
 					Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
+					Default: "Nothing",
 					Encoder: elm.MapEncoder(fieldPb, nested),
 					Decoder: elm.MapDecoder(fieldPb, nested),
 				}
@@ -456,6 +476,7 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 					Name:    elm.FieldName(fieldPb.GetName()),
 					Type:    elm.MaybeType(elm.BasicFieldType(fieldPb)),
 					Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
+					Default: fieldDefault(fieldPb),
 					Encoder: elm.MaybeEncoder(fieldPb),
 					Decoder: elm.MaybeDecoder(fieldPb),
 				}
@@ -468,6 +489,7 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 					Name:    elm.FieldName(fieldPb.GetName()),
 					Type:    elm.ListType(elm.BasicFieldType(fieldPb)),
 					Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
+					Default: "[]",
 					Encoder: elm.ListEncoder(fieldPb),
 					Decoder: elm.ListDecoder(fieldPb),
 				}
@@ -479,6 +501,7 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 				Name:    elm.FieldName(fieldPb.GetName()),
 				Type:    elm.BasicFieldType(fieldPb),
 				Number:  elm.ProtobufFieldNumber(fieldPb.GetNumber()),
+				Default: fieldDefault(fieldPb),
 				Encoder: elm.RequiredFieldEncoder(fieldPb),
 				Decoder: elm.RequiredFieldDecoder(fieldPb),
 			}
@@ -497,6 +520,7 @@ func messages(preface []string, messagePbs []*descriptorpb.DescriptorProto, p pa
 			alias.Fields = append(alias.Fields, elm.TypeAliasField{
 				Name:    elm.FieldName(oneOfPb.GetName()),
 				Type:    typeName,
+				Default: string(typeName + "Unspecified"),
 				Decoder: elm.OneOfDecoder(oneOfPb, typeName),
 			})
 		}
