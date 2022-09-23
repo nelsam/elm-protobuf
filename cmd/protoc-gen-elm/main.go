@@ -273,6 +273,37 @@ maybeEncoder enc v =
             enc av
 
 
+type Field a
+  = Null
+  | Present a
+
+
+{- failOnNull helps us handle oneof fields.  In JS land,
+oneofs are presented with empty slots in the backing
+array.  We need the empty slots to be translated to null
+since elm doesn't know how to handle empty slots in a
+list (which is totally fair).
+
+Then, the decoder for a oneof variant needs to fail if
+the value is null.  That's what this function does.
+-}
+failOnNull : JD.Decoder a -> JD.Decoder a
+failOnNull decoder =
+  JD.oneOf
+    [ JD.null Null
+    , JD.map Present decoder
+    ]
+    |> JD.andThen
+      (\v ->
+        case v of
+          Null ->
+            JD.fail "received null value"
+
+          Present fv ->
+            JD.succeed fv
+      )
+
+
 {{- range .TopEnums }}
 
 

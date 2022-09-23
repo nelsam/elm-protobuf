@@ -121,7 +121,7 @@ type {{ .Name }}
 {{ .Decoder }} : JD.Decoder {{ .Name }}
 {{ .Decoder }} =
     JD.lazy <| \_ -> JD.oneOf
-        [{{ range $i, $v := .Variants }}{{ if $i }},{{ end }} JD.map {{ .Name }} (JD.index {{ toJSIdx .Num }} {{ .Decoder }})
+        [{{ range $i, $v := .Variants }}{{ if $i }},{{ end }} JD.map {{ .Name }} (JD.index {{ toJSIdx .Num }} (failOnNull {{ .Decoder }}))
         {{ end }}, JD.succeed {{ .Name }}Unspecified
         ]
 
