@@ -12,9 +12,7 @@ import (
 	"text/template"
 
 	"github.com/jalandis/elm-protobuf/pkg/stringextras"
-
 	"github.com/jalandis/elm-protobuf/pkg/elm"
-
 	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -260,8 +258,8 @@ custom =
     JD.map2 (|>)
 
 
-requiredIdx : Int -> JD.Decoder a -> a -> JD.Decoder (a -> b) -> JD.Decoder b
-requiredIdx idx decoder default =
+idxWithDefault : Int -> JD.Decoder a -> a -> JD.Decoder (a -> b) -> JD.Decoder b
+idxWithDefault idx decoder default =
     JD.map2 (|>) (JD.oneOf [ JD.index idx decoder, JD.succeed default ])
 
 

@@ -151,7 +151,7 @@ func FieldNum(pb *descriptorpb.FieldDescriptorProto) ProtobufFieldNumber {
 
 func RequiredFieldDecoder(pb *descriptorpb.FieldDescriptorProto) FieldDecoder {
 	return FieldDecoder(fmt.Sprintf(
-		"requiredIdx %d %s %s",
+		"idxWithDefault %d %s %s",
 		jsIdx(FieldNum(pb)),
 		BasicFieldDecoder(pb),
 		BasicFieldDefaultValue(pb),
@@ -224,7 +224,7 @@ func MaybeEncoder(pb *descriptorpb.FieldDescriptorProto) FieldEncoder {
 
 func MaybeDecoder(pb *descriptorpb.FieldDescriptorProto) FieldDecoder {
 	return FieldDecoder(fmt.Sprintf(
-		"requiredIdx %d (JD.maybe %s) Nothing",
+		"idxWithDefault %d (JD.maybe %s) Nothing",
 		jsIdx(FieldNum(pb)),
 		BasicFieldDecoder(pb),
 	))
@@ -244,7 +244,7 @@ func ListEncoder(pb *descriptorpb.FieldDescriptorProto) FieldEncoder {
 
 func ListDecoder(pb *descriptorpb.FieldDescriptorProto) FieldDecoder {
 	return FieldDecoder(fmt.Sprintf(
-		"requiredIdx %d (JD.list %s) []",
+		"idxWithDefault %d (JD.list %s) []",
 		jsIdx(FieldNum(pb)),
 		BasicFieldDecoder(pb),
 	))
